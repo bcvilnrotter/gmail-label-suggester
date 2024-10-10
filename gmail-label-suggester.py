@@ -1,19 +1,17 @@
+# %%
 # import modules
-from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import sys,argparse,os,base64,re,itertools
 from datetime import datetime,timezone
 from collections import Counter
 from lxml import html
-from html import unescape
 from nltk import ngrams
-from nltk.corpus import stopwords
 import nltk
 
+# %%
 # download the specific packages for helping navigate through the n-gram part of the analysis
 nltk.download('punkt')
-nltk.download('stopwords')
 
 # Define the scopes that will be used when interacting with your gmail account
 SCOPES = [
@@ -21,8 +19,8 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.settings.basic'
 ]
 
+# %%
 # region argparse
-
 # Prepare the argparse section for the script to function
 parser = argparse.ArgumentParser()
 
@@ -32,8 +30,8 @@ parser.add_argument('--labels',nargs='+',help='a string or list of label names t
 
 # Add the optional arguments. All should have a default value
 parser.add_argument('--num_common_phrases',default=3,help="a number that will be used to tell the script how many most common phrases to make into a filter query")
-parser.add_argument('--num_common_phrases_pulled',default=20,help="a number that will be used to tell the script how many top common phrases to look for in the pulled email collection")
-parser.add_argument('--num_phrase_compare_window',default=2,help="the window size of the ngram to compare within pulled email content")
+parser.add_argument('--num_common_phrases_pulled',default=10,help="a number that will be used to tell the script how many top common phrases to look for in the pulled email collection")
+parser.add_argument('--num_phrase_compare_window',default=4,help="the window size of the ngram to compare within pulled email content")
 
 args = parser.parse_args()
 
@@ -46,7 +44,7 @@ if not args.labels:
     parser.error("Please provide a label that the script can use to pull emails from using --label")
 
 #endregion
-
+# %%
 #region basic_functions
 
 # the get_now function will be used to ensure that a consistent timestamp would be provided to all items that require it (like logging)
@@ -74,7 +72,7 @@ def spinner():
         yield next(spinner_cycle)
 
 #endregion
-
+# %%
 #region helper_functions
 
 # function used to authenticate the session using a credential file
@@ -142,20 +140,6 @@ def get_emails(service,label):
             if 'data' in msg['payload']['body']:
                 email_content = base64.urlsafe_b64decode(msg['payload']['body']['data'].encode('ASCII')).decode('utf-8')
 
-            # Find plain text or HTML content
-            """
-            email_content = ""
-            if parts is None and 'body' in payload:
-                email_content = payload['body'].get('data')
-            elif parts:
-                for part in parts:
-                    email_content = part.get('body').get('data')
-                    if email_content:
-                        email_content = base64.urlsafe_b64decode(part.get('body').get('data').encode('ASCII')).decode('utf-8')
-                    if part.get('mimeType') == 'text/html':
-                        email_content = clean_html(email_content)  # Strip HTML tags
-            """
-
             try:
                 clean_content = clean_html(email_content)
                 email_contents.append(clean_content)
@@ -178,21 +162,15 @@ def get_emails(service,label):
 # function to analyze a large string of information to pull out the most common phrase using n-grams
 # n is the number of words to compare sequentially in a string
 # n_common is the number of most common phraases found
-def analyze_email_content(email_content,n=args.num_phrase_compare_window,n_common=args.num_common_phrases_pulled):
+def analyze_email_content(email_content,n=4,n_common=10):
     email_content = re.sub(r'\s+',' ',email_content).strip() # remove excess whitespace
-    stop_words = set(stopwords.words('english'))
-    words = re.findall(r'\b\w{3,}}\b',email_content.lower())
-    words = [word for word in words if word not in stop_words]
+    words = [word for word in re.findall(r'\b\w{3,}\b', email_content.lower())]
     n_grams = ngrams(words,n)
     common_phrases = Counter(n_grams).most_common(n_common)
-
-    # Filter out common HTML/CSS terms
-    unhelpful_terms = {'max','width','media','0'}
-    filtered_phrases = [phrase for phrase in common_phrases if all(word not in unhelpful_terms for word in phrase[0])]
-    return filtered_phrases
+    return common_phrases
 
 #endregion
-
+# %%
 # main function initiation and call
 def main():
     
@@ -213,11 +191,12 @@ def main():
         email_contents = get_emails(service,label_dict[label])
         log(f'|- content from {len(email_contents)} messages were pulled.')
         # convert list of email contents into a giant string for easier n-gram analysis
-        common_phrases = analyze_email_content(' '.join(email_contents))
+        common_phrases = analyze_email_content(' '.join(email_contents),n=args.num_phrase_compare_window,n_common=args.num_common_phrases_pulled)
         # create a condition string that can be used in a filter
-        filter_query = ' OR '.join(['"{} {}"'.format(phrase[0][0],phrase[0][1]) for phrase in common_phrases[:args.num_common_phrases]])
+        #filter_query = ' OR '.join(['"{} {}"'.format(phrase[0][0],phrase[0][1]) for phrase in common_phrases[:args.num_common_phrases]])
+        #TODO Need to 
         log(f'|- filter query created:')
-        log(f'   |- [{filter_query}]')
+        log(f'   |- [{common_phrases}]')
         #create_gmail_filter
 
 if __name__ == "__main__":
